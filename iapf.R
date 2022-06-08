@@ -168,7 +168,6 @@ while(index){
     }
     
     print(Z[l])
-    print(Z[l]/mean(Z_true))
           
     l <- l+1
   }else break
