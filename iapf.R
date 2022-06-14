@@ -1,8 +1,9 @@
 
 library(mvtnorm)
 library(MASS)
+library(profvis)
 
-#settings
+####settings####
 set.seed(123)
 alpha <- 0.42
 d <- 5
@@ -27,11 +28,12 @@ w <- matrix(NA, nrow = Time, ncol = 20000 ) #weight
 Z <- vector()  #approximation
 
 f <- function(x){
-  return (mvrnorm(n = 1, mu = A%*%x, Sigma = B)) #trans prob
+  return (rnorm(d) + as.vector(A%*%x))   #trans prob
 }
 
-g <- function(x, state){
-  return (mvtnorm::dmvnorm(x, mean = C%*%state, sigma = D)) #obs prob
+g <- function(x, state){  
+  return (0.01010533*exp((-1/2)*t(x-state)%*%(x-state))) #obs prob
+  #det(diag(2*pi, nrow = d, ncol = d))^(-1/2) = 0.01010533
 }
 
 psi <- matrix(NA, nrow = Time, ncol = 20000) #iterated psi to decide psi_t for each l
@@ -48,11 +50,11 @@ f_aux <- function(x, best, t, l){
   return(f(x)*psi_t(x, best, t, l)/psi_tilda(x, best, t))  #f_2:T 
 }
 
-ESS <- function(t,l){
+ESS <- function(t,l,w){
   return(sum(w[t-1,1:N[l]])^2/sum(w[t-1,1:N[l]]^2))
 }
 
-best <- matrix(NA, nrow = Time, ncol = d+d*d+1)
+best <- matrix(NA, nrow = Time, ncol = 2*d+1)
 
 #1. Initialize
 #l=0  large outer iteration
@@ -65,9 +67,9 @@ psi_tilda <- function(x, best, t){  #from 0 to T. 0,T = 1
   if(t == (Time + 1) | 1){
     psi_tilda <- 1
   }else{   #best_t = psi_t
-    psi_tilda <- det(2*pi*(B+matrix(best[t, (d+1):(d+d^2)], nrow=d,ncol=d)))^
+    psi_tilda <- det(2*pi*(B+diag(best[t, (d+1):(d+5)], nrow=d,ncol=d)))^
       (-1/2)*exp((-1/2)*t(A%*%x-best[t, 1:d])%*%solve(
-        B+matrix(best[t, (d+1):(d+d^2)], nrow=d,ncol=d))%*%
+        B+diag(best[t, (d+1):(d+5)], nrow=d,ncol=d))%*%
           (A%*%x-best[t, 1:d]))  #f(xt, ψt+1 )   #need +1??
   }
   
@@ -78,79 +80,198 @@ psi_t <- function(x, best, t, l){ #from 1 to T+1. 1, T+1 = 1
   if(t == (Time + 1) | 1){
     psi_t <- 1
   }else{
-    psi_t <- mvtnorm::dmvnorm(x, mean = best[t, 1:d], sigma = matrix(best[t, (d+1):(d+d^2)], nrow=d,ncol=d)) + 1/N[l]
+    psi_t <- det(diag(2*pi*best[t, (d+1):(d+5)], nrow=d,ncol=d))^(-1/2)*						
+      exp((-1/2)*t(x-best[t, 1:d])%*%diag((2*pi*best[t, (d+1):(d+5)])^(-1), nrow=d,ncol=d)%*%						
+            (x-best[t, 1:d])) + 1/N[l]
   }
+  
   
   return(psi_t)
 }
 
-#2. repeat
+####APF function####
+APF <- function(best, l){
+  #l >= 2
+  
+  Z[l] <- 1
+  X_true[1,] <- rnorm(d) 
+  for(t in 2:Time){  #observations
+    X_true[t,] <- f(X_true[t-1,])   #t(rnorm(d) + A%*%x)
+  }
+  obs <- rnorm(d) + X_true
+  
+  X[1,1:N[l],] <- rnorm(N[l]*d)   #particles
+  
+  for(i in 1:N[l]){
+    w[1,i] <- g_aux(obs[1,], X[1,i,],1, best, l) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], best, 2)  
+  }
+  
+  #t=2:T
+  #2. conditional sample
+  for(t in 2:Time){
+    
+    print(t)
+    
+    #a)
+    
+    if(ESS(t,l,w) <= kappa*N[l]){
+      
+      for(i in 1:N[l]){
+        
+        for(j in 1:N[l]){
+          Sum[j,] <- w[t-1,j]*f_aux(X[t-1,j,],best, t, l)/sum(w[t-1,1:N[l]])  
+        }
+        X[t,i,] <- colSums(Sum[1:N[l],])
+        w[t,i] <- g_aux(obs[t,], X[t,i,], t, best, l)  
+      }
+      
+    }else{
+      
+      #b)
+      for(i in 1:N[l]){
+        
+        X[t,i,] <- f_aux(X[t-1,i,],best, t, l) 
+        w[t,i] <- w[t-1,i]*g_aux(obs[t,], X[t,i,],t, best, l)  
+      }
+    }
+    
+  }
+  Z[l] = 1
+  for(t in 1:Time){
+    Z[l] = Z[l]*mean(apply(X[t,1:N[l],],1,function(state) 
+      0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state))))
+  }
+  
+  return(list(obs, X, w, Z))
+}
+
+####psi function####
+Psi <- function(l, obs, state){
+  
+  
+  for(t in Time:1){
+    
+    print(t)
+    
+    if(t == Time){
+      psi[t,1:N[l]] <- apply(X[t,1:N[l],],1,function(state) 
+        0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state)))
+    }else{
+      
+      for(i in 1:N[l]){
+        psi[t,i] <- g(obs[t,],X[t,i,])*
+          (det(2*pi*(B+diag(best[t+1, (d+1):(d+5)], nrow=d,ncol=d)))^
+             (-1/2)*exp((-1/2)*t(A%*%X[t,i,]-best[t+1, 1:d])%*%solve(
+               B+diag(best[t+1, (d+1):(d+5)], nrow=d,ncol=d))%*%
+                 (A%*%X[t,i,]-best[t+1, 1:d]))+1/N[l])
+      }
+    }
+    
+    
+    #2. calculate psi_t
+    #calculate min
+    
+    
+    fn <- function(x){
+      sum_arg = 0						
+      for(i in 1:N[l]){						
+        sum_arg = sum_arg + (det(diag(2*pi*x[(d+1):(d+5)], nrow=d,ncol=d))^(-1/2)*						
+                               exp((-1/2)*t(X[t,i,]-x[1:d])%*%diag((2*pi*x[(d+1):(d+5)])^(-1), nrow=d,ncol=d)%*%						
+                                     (X[t,i,]-x[1:d]))-x[2*d+1]*psi[t,i])^2						
+      }						
+      return(sum_arg)
+    }
+    #get the distribution of psi_t
+    if(t == Time){
+      best[t,] <- optim(par = c(rep(mean(X[t,1:N[l],]), d), rep(var(X[t,1:N[l],1]), d), 1),
+                        fn = fn, method = "BFGS")$par
+    }else{
+      best[t,] <- optim(par = c(best[t+1,1:d], best[t+1,(d+1):(d+5)], best[t+1,ncol(best)]),
+                        fn = fn, method = "BFGS")$par
+    }
+     
+    
+  }
+ 
+  return(best)
+  
+}
+
+####2. repeat####
 index = 1
 Sum <- matrix(NA, nrow = 20000, ncol = 5)
-Z_true <- vector()
 l = 1  #actually 0
+Z[l] = 1
 
 #initialization l=1, run a psi^0 apf with N[1]
 #psi_1...psi_T+1 = 1
 #psi.tilda_0...psi.tilda_T = 1
 
-X_true[1,] <- mvrnorm(n = 1, mu = m, Sigma = cov)
-obs[1,] <- mvrnorm(n = 1, mu = C%*%X_true[1,], Sigma = D)
-
+X_true[1,] <- rnorm(d) + m    #real writing!
 for(t in 2:Time){  #observations
-  X_true[t,] <- f(X_true[t-1,])
-  obs[t,] <- mvrnorm(n = 1, mu = C%*%X_true[t,], Sigma = D)
+  X_true[t,] <- f(X_true[t-1,])   #t(rnorm(d) + A%*%x)
 }
+obs <- rnorm(d) + X_true
+
 
 #t = 1
 #generate particles and weights
 
-Fun <- function(state){
-  return(g(obs[1,], state))
+X[1,1:N[l],] <- rnorm(N[l]*d)  #particles
+for(i in 1:N[l]){
+  w[1,i] <- g(obs[1,], X[1,i,])  #weights
 }
-X[1,,] <- mvrnorm(n = N[l], mu = m, Sigma = cov)  #particles
-w[1,] <- apply(X[1,,],1,Fun)  #weights
 
-#approximation
-Z[l] <-sum(w[1,1:N[l]])/N[l]  
+
 
 #t=2:T
 #2. conditional sample
 
 for(t in 2:Time){
+  print(t)
   
   #a)
   
-  if(ESS(t,l) <= kappa*N[l]){
+  if(ESS(t,l,w) <= kappa*N[l]){
     
     for(i in 1:N[l]){
+      
       
       for(j in 1:N[l]){
         Sum[j,] <- w[t-1,j]*f(X[t-1,j,])
       }
       X[t,i,] <- colSums(Sum[1:N[l],])/sum(w[t-1,1:N[l]])  
+      w[t,i] <- g(obs[t,], X[t,i,])  
     }
-    w[t,] <- apply(X[t,,],1,Fun)
     
-    #approximation
-    Z[l] <- Z[l]*sum(w[t,1:N[l]])/N[l] 
     
   }else{
     
     #b)
-    X[t,,] <- apply(X[t-1,,],1,f)
+   
     for(i in 1:N[l]){
+      X[t,i,] <- f(X[t-1,i,])   
       w[t,i] <- w[t-1,i]*g(obs[t,], X[t,i,])  
     }
   }
   
 }
-Z[l] <- Z[l]*sum(w[Time,1:N[l]])/N[l]
+for(t in 1:Time){
+  Z[l] = Z[l]*mean(apply(X[t,1:N[l],],1,function(state) 0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state))))
+}
+print(Z[l])
+
 
 while(index){
   #a)
+  output <- list()
+  
   if(l != 1){
-    source("APF.R")
+    output <-  APF(best, l)
+    obs <-output[[1]]
+    X <- output[[2]]
+    w <- output[[3]]
+    Z <- output[[4]]
   }
   
   print(l)
@@ -159,15 +280,16 @@ while(index){
 
   if(l <= k | (sd(Z[max(l-k,1):l])/mean(Z[max(l-k,1):l]) >= tau)){
     #psi^{l+1}
-    source("psi.R") 
+    best <- Psi(l, obs, state) 
     
     if(l > k & N[max(l-k,1)] == N[l] & is.unsorted(Z[max(l-k,1):l])){
       N[l+1] <- 2*N[l]
+      
     }else{
       N[l+1] <- N[l]
     }
     
-    print(Z[l])
+    print(Z[l])   #Z[l]
           
     l <- l+1
   }else break
@@ -175,3 +297,5 @@ while(index){
 
 #3.
 Z_appro <- Z[l]
+
+
