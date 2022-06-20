@@ -1,4 +1,3 @@
-
 library(mvtnorm)
 library(MASS)
 library(profvis)
@@ -14,7 +13,7 @@ m <- rep(0, d)
 N <- vector()
 N[1] <- 1000
 Time <- 100
-cov = B = C = D = diag(1, nrow = d, ncol = d)
+cov = B = C = D = diag(rep(1,5), nrow = d, ncol = d)
 A <- matrix(nrow = d, ncol = d)
 for (i in 1:d){
   for (j in 1:d){
@@ -32,22 +31,34 @@ f <- function(x){
 }
 
 g <- function(x, state){  
-  return (0.01010533*exp((-1/2)*t(x-state)%*%(x-state))) #obs prob
+  return (0.01010533*exp((-1/2)*t(x-state)%*%(x-state))) #obs prob  C%*%state = state
   #det(diag(2*pi, nrow = d, ncol = d))^(-1/2) = 0.01010533
 }
 
 psi <- matrix(NA, nrow = Time, ncol = 20000) #iterated psi to decide psi_t for each l
 
-g_aux <- function(x, state, t, best, l){   
+g_aux <- function(x, state, t, best){   
   if(t == 1){
-    return(g(x, state)*psi_tilda(state, best, 2))  #g_1
+    return(g(x, state)*psi_tilda(state, best, 2)
+           )  #g_1
   }else{
-    return(g(x, state)*psi_tilda(state, best, t+1)/psi_t(state, best, t, l))  #g_2:T 
+    return(mvtnorm::dmvnorm(x, mean = as.vector(diag((1-(best[t, (d+1):(d+5)])^(-1))^(-1), nrow=d,ncol=d)%*%
+                     (state - diag((best[t, (d+1):(d+5)])^(-1), nrow=d,ncol=d)%*%best[t,1:d])), 
+                   sigma = diag((1-(best[t, (d+1):(d+5)])^(-1))^(-1), nrow=d,ncol=d))*
+             psi_tilda(state, best, t+1)*det(diag(best[t, (d+1):(d+5)], nrow=d,ncol=d))/
+             (det(diag(best[t, (d+1):(d+5)]-1, nrow=d,ncol=d))*
+                det(2*pi*(diag(best[t, (d+1):(d+5)]-1, nrow=d,ncol=d)))^(-1/2)*
+                exp((-1/2)*t(state-best[t, 1:d])%*%diag((best[t, (d+1):(d+5)]-1)^(-1), nrow=d,ncol=d)%*%
+                      (state-best[t, 1:d]))))  #g_2:T 
   }
 }
 
-f_aux <- function(x, best, t, l){   
-  return(f(x)*psi_t(x, best, t, l)/psi_tilda(x, best, t))  #f_2:T 
+
+# this is Gaussian above how to simplify? can z and z diminish?
+f_aux <- function(x, best, t){   
+  return(mvrnorm(1, mu = diag(((best[t, (d+1):(d+5)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
+                   (diag((best[t, (d+1):(d+5)])^(-1), nrow=d,ncol=d)%*%best[t,1:d]+A%*%x), 
+                 Sigma = diag(((best[t, (d+1):(d+5)])^(-1)+1)^(-1), nrow=d,ncol=d)))  #f_2:T 
 }
 
 ESS <- function(t,l,w){
@@ -55,6 +66,10 @@ ESS <- function(t,l,w){
 }
 
 best <- matrix(NA, nrow = Time, ncol = 2*d+1)
+
+Num <- function(Z, l, k){
+  return(sd(exp(Z[max(l-k,1):l]-max(Z)))/mean(exp(Z[max(l-k,1):l]-max(Z))))
+  }
 
 #1. Initialize
 #l=0  large outer iteration
@@ -70,7 +85,7 @@ psi_tilda <- function(x, best, t){  #from 0 to T. 0,T = 1
     psi_tilda <- det(2*pi*(B+diag(best[t, (d+1):(d+5)], nrow=d,ncol=d)))^
       (-1/2)*exp((-1/2)*t(A%*%x-best[t, 1:d])%*%solve(
         B+diag(best[t, (d+1):(d+5)], nrow=d,ncol=d))%*%
-          (A%*%x-best[t, 1:d]))  #f(xt, ψt+1 )   #need +1??
+          (A%*%x-best[t, 1:d]))  #f(xt, Ït+1 )   #need +1??
   }
   
   return(psi_tilda)
@@ -93,7 +108,7 @@ psi_t <- function(x, best, t, l){ #from 1 to T+1. 1, T+1 = 1
 APF <- function(best, l){
   #l >= 2
   
-  Z[l] <- 1
+  Z[l] <- 0
   X_true[1,] <- rnorm(d) 
   for(t in 2:Time){  #observations
     X_true[t,] <- f(X_true[t-1,])   #t(rnorm(d) + A%*%x)
@@ -103,7 +118,7 @@ APF <- function(best, l){
   X[1,1:N[l],] <- rnorm(N[l]*d)   #particles
   
   for(i in 1:N[l]){
-    w[1,i] <- g_aux(obs[1,], X[1,i,],1, best, l) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], best, 2)  
+    w[1,i] <- g_aux(obs[1,], X[1,i,],1, best) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], best, 2)  
   }
   
   #t=2:T
@@ -116,13 +131,16 @@ APF <- function(best, l){
     
     if(ESS(t,l,w) <= kappa*N[l]){
       
+      w_ <- w[t-1,1:N[l]]/sum(w[t-1,1:N[l]])   #each t
+      mix <- sample(1:N[l],N[l], replace = TRUE, prob = w_)
+      X[t,1:N[l],] <- apply(X[t-1, mix,], 1, function(x) rnorm(d)%*%
+                              diag(((best[t, (d+1):(d+5)])^(-1)+1)^(-1), nrow=d,ncol=d) + 
+                              as.vector(diag(((best[t, (d+1):(d+5)])^(-1)+1)^(-1), nrow=d, ncol=d)%*%
+                                          (diag((best[t, (d+1):(d+5)])^(-1), nrow=d,ncol=d)%*%best[t,1:d]+A%*%x)))
+      
       for(i in 1:N[l]){
         
-        for(j in 1:N[l]){
-          Sum[j,] <- w[t-1,j]*f_aux(X[t-1,j,],best, t, l)/sum(w[t-1,1:N[l]])  
-        }
-        X[t,i,] <- colSums(Sum[1:N[l],])
-        w[t,i] <- g_aux(obs[t,], X[t,i,], t, best, l)  
+        w[t,i] <- g_aux(obs[t,], X[t,i,], t, best)  
       }
       
     }else{
@@ -130,23 +148,23 @@ APF <- function(best, l){
       #b)
       for(i in 1:N[l]){
         
-        X[t,i,] <- f_aux(X[t-1,i,],best, t, l) 
-        w[t,i] <- w[t-1,i]*g_aux(obs[t,], X[t,i,],t, best, l)  
+        X[t,i,] <- f_aux(X[t-1,i,],best, t) 
+        w[t,i] <- w[t-1,i]*g_aux(obs[t,], X[t,i,],t, best)  
       }
     }
     
   }
-  Z[l] = 1
+  Z[l] = 0
   for(t in 1:Time){
-    Z[l] = Z[l]*mean(apply(X[t,1:N[l],],1,function(state) 
-      0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state))))
+    Z[l] = Z[l] + log(mean(apply(X[t,1:N[l],],1,function(state) 
+      0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state)))))
   }
   
   return(list(obs, X, w, Z))
 }
 
 ####psi function####
-Psi <- function(l, obs, state){
+Psi <- function(l, obs, state, X){
   
   
   for(t in Time:1){
@@ -201,7 +219,7 @@ Psi <- function(l, obs, state){
 index = 1
 Sum <- matrix(NA, nrow = 20000, ncol = 5)
 l = 1  #actually 0
-Z[l] = 1
+Z[l] = 0
 
 #initialization l=1, run a psi^0 apf with N[1]
 #psi_1...psi_T+1 = 1
@@ -223,7 +241,6 @@ for(i in 1:N[l]){
 }
 
 
-
 #t=2:T
 #2. conditional sample
 
@@ -234,16 +251,12 @@ for(t in 2:Time){
   
   if(ESS(t,l,w) <= kappa*N[l]){
     
-    for(i in 1:N[l]){
-      
-      
-      for(j in 1:N[l]){
-        Sum[j,] <- w[t-1,j]*f(X[t-1,j,])
-      }
-      X[t,i,] <- colSums(Sum[1:N[l],])/sum(w[t-1,1:N[l]])  
-      w[t,i] <- g(obs[t,], X[t,i,])  
-    }
+    w_ <- w[t-1,1:N[l]]/sum(w[t-1,1:N[l]])
+    mix <- sample(1:N[l],N[l], replace = TRUE, prob = w_)
+    X[t,1:N[l],] <- apply(X[t-1, mix,], 1, f )
     
+    w[t, 1:N[l]] <- apply(X[t, 1:N[l],], 1, function(state) 0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state)))
+      
     
   }else{
     
@@ -257,7 +270,7 @@ for(t in 2:Time){
   
 }
 for(t in 1:Time){
-  Z[l] = Z[l]*mean(apply(X[t,1:N[l],],1,function(state) 0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state))))
+  Z[l] = Z[l] + log(mean(apply(X[t,1:N[l],],1,function(state) 0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state)))))
 }
 print(Z[l])
 
@@ -278,9 +291,9 @@ while(index){
   
   #b)
 
-  if(l <= k | (sd(Z[max(l-k,1):l])/mean(Z[max(l-k,1):l]) >= tau)){
+  if(l <= k | (Num(Z, l, k) >= tau)){
     #psi^{l+1}
-    best <- Psi(l, obs, state) 
+    best <- Psi(l, obs, state, X) 
     
     if(l > k & N[max(l-k,1)] == N[l] & is.unsorted(Z[max(l-k,1):l])){
       N[l+1] <- 2*N[l]
@@ -290,6 +303,7 @@ while(index){
     }
     
     print(Z[l])   #Z[l]
+    
           
     l <- l+1
   }else break
@@ -297,5 +311,3 @@ while(index){
 
 #3.
 Z_appro <- Z[l]
-
-
