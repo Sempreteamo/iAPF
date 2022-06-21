@@ -26,6 +26,13 @@ obs <- matrix(0, nrow = Time, ncol = 5 )
 w <- matrix(NA, nrow = Time, ncol = 20000 ) #weight
 Z <- vector()  #approximation
 
+# FKF
+
+dt <- ct <- matrix(0,5,1)
+Tt <- A
+P0 <- Zt <- Ht <- Gt <- diag(1,5,5)
+a0 <- rep(0,d)
+
 f <- function(x){
   return (rnorm(d) + as.vector(A%*%x))   #trans prob
 }
@@ -37,19 +44,12 @@ g <- function(x, state){
 
 psi <- matrix(NA, nrow = Time, ncol = 20000) #iterated psi to decide psi_t for each l
 
-g_aux <- function(x, state, t, best){   
+g_aux <- function(x, state, t, best, l){   
   if(t == 1){
-    return(g(x, state)*psi_tilda(state, best, 2)
+    return(g(x, state)*psi_tilda(state, best, 1, l)
            )  #g_1
   }else{
-    return(mvtnorm::dmvnorm(x, mean = as.vector(diag((1-(best[t, (d+1):(d+5)])^(-1))^(-1), nrow=d,ncol=d)%*%
-                     (state - diag((best[t, (d+1):(d+5)])^(-1), nrow=d,ncol=d)%*%best[t,1:d])), 
-                   sigma = diag((1-(best[t, (d+1):(d+5)])^(-1))^(-1), nrow=d,ncol=d))*
-             psi_tilda(state, best, t+1)*det(diag(best[t, (d+1):(d+5)], nrow=d,ncol=d))/
-             (det(diag(best[t, (d+1):(d+5)]-1, nrow=d,ncol=d))*
-                det(2*pi*(diag(best[t, (d+1):(d+5)]-1, nrow=d,ncol=d)))^(-1/2)*
-                exp((-1/2)*t(state-best[t, 1:d])%*%diag((best[t, (d+1):(d+5)]-1)^(-1), nrow=d,ncol=d)%*%
-                      (state-best[t, 1:d]))))  #g_2:T 
+    return(g(x, state)*psi_tilda(state, best, t, l)/psi_t(state, best, t, l))  #g_2:T 
   }
 }
 
@@ -78,14 +78,14 @@ Num <- function(Z, l, k){
 
 #use psi_t to calulcate psi_tilda[t]
 
-psi_tilda <- function(x, best, t){  #from 0 to T. 0,T = 1
-  if(t == (Time + 1) | 1){
+psi_tilda <- function(x, best, t, l){  #from 0 to T. 0,T = 1
+  if(t == Time){
     psi_tilda <- 1
   }else{   #best_t = psi_t
-    psi_tilda <- det(2*pi*(B+diag(best[t, (d+1):(d+5)], nrow=d,ncol=d)))^
-      (-1/2)*exp((-1/2)*t(A%*%x-best[t, 1:d])%*%solve(
-        B+diag(best[t, (d+1):(d+5)], nrow=d,ncol=d))%*%
-          (A%*%x-best[t, 1:d]))  #f(xt, Ït+1 )   #need +1??
+    psi_tilda <- det(2*pi*(diag(best[t, (d+1):(d+5)]+1, nrow=d,ncol=d)))^
+      (-1/2)*exp((-1/2)*t(A%*%x-best[t, 1:d])%*%
+        diag((best[t, (d+1):(d+5)]+1)^(-1), nrow=d,ncol=d)%*%
+          (A%*%x-best[t, 1:d])) + 1/N[l]  #f(xt, Ït+1 )   #need +1??
   }
   
   return(psi_tilda)
@@ -118,7 +118,7 @@ APF <- function(best, l){
   X[1,1:N[l],] <- rnorm(N[l]*d)   #particles
   
   for(i in 1:N[l]){
-    w[1,i] <- g_aux(obs[1,], X[1,i,],1, best) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], best, 2)  
+    w[1,i] <- g_aux(obs[1,], X[1,i,],1, best, l) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], best, 2)  
   }
   
   #t=2:T
@@ -140,7 +140,7 @@ APF <- function(best, l){
       
       for(i in 1:N[l]){
         
-        w[t,i] <- g_aux(obs[t,], X[t,i,], t, best)  
+        w[t,i] <- g_aux(obs[t,], X[t,i,], t, best, l)  
       }
       
     }else{
@@ -149,7 +149,7 @@ APF <- function(best, l){
       for(i in 1:N[l]){
         
         X[t,i,] <- f_aux(X[t-1,i,],best, t) 
-        w[t,i] <- w[t-1,i]*g_aux(obs[t,], X[t,i,],t, best)  
+        w[t,i] <- w[t-1,i]*g_aux(obs[t,], X[t,i,],t, best, l)  
       }
     }
     
@@ -160,7 +160,10 @@ APF <- function(best, l){
       0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state)))))
   }
   
-  return(list(obs, X, w, Z))
+  fkf.obj <- -fkf(a0, P0, dt, ct, Tt, Zt, Ht,
+                  Gt, yt = t(obs))$logLik
+  
+  return(list(obs, X, w, Z, fkf.obj))
 }
 
 ####psi function####
@@ -190,7 +193,7 @@ Psi <- function(l, obs, state, X){
     #calculate min
     
     
-    fn <- function(x){
+    fn <- function(x, X, psi){
       sum_arg = 0						
       for(i in 1:N[l]){						
         sum_arg = sum_arg + (det(diag(2*pi*x[(d+1):(d+5)], nrow=d,ncol=d))^(-1/2)*						
@@ -201,11 +204,11 @@ Psi <- function(l, obs, state, X){
     }
     #get the distribution of psi_t
     if(t == Time){
-      best[t,] <- optim(par = c(rep(mean(X[t,1:N[l],]), d), rep(var(X[t,1:N[l],1]), d), 1),
-                        fn = fn, method = "BFGS")$par
+      best[t,] <- optim(par = c(rep(0, d), rep(10, d), 3),
+                        fn = fn, X = X, psi = psi, method = "BFGS")$par
     }else{
       best[t,] <- optim(par = c(best[t+1,1:d], best[t+1,(d+1):(d+5)], best[t+1,ncol(best)]),
-                        fn = fn, method = "BFGS")$par
+                        fn = fn, X = X, psi = psi, method = "BFGS")$par
     }
      
     
@@ -240,7 +243,7 @@ for(i in 1:N[l]){
   w[1,i] <- g(obs[1,], X[1,i,])  #weights
 }
 
-
+a=0
 #t=2:T
 #2. conditional sample
 
@@ -257,6 +260,7 @@ for(t in 2:Time){
     
     w[t, 1:N[l]] <- apply(X[t, 1:N[l],], 1, function(state) 0.01010533*exp((-1/2)*t(obs[t,]-state)%*%(obs[t,]-state)))
       
+    a=a+1
     
   }else{
     
@@ -274,8 +278,12 @@ for(t in 1:Time){
 }
 print(Z[l])
 
+fkf.obj <- -fkf(a0, P0, dt, ct, Tt, Zt, Ht, Gt, yt = t(obs))$logLik
+print(exp(Z[l] + fkf.obj))
 
 while(index){
+  
+  print(l)
   #a)
   output <- list()
   
@@ -285,9 +293,10 @@ while(index){
     X <- output[[2]]
     w <- output[[3]]
     Z <- output[[4]]
+    fkf.obj <- output[[5]]
   }
   
-  print(l)
+  
   
   #b)
 
@@ -304,7 +313,8 @@ while(index){
     
     print(Z[l])   #Z[l]
     
-          
+    print(exp(Z[l] + fkf.obj))
+    
     l <- l+1
   }else break
 }
