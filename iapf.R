@@ -1,3 +1,4 @@
+
 library(mvtnorm)
 library(MASS)
 library(profvis)
@@ -21,10 +22,10 @@ for (i in 1:d){
     A[i,j] = alpha^(abs(i-j) + 1)
   }
 }
-X <- array(0, dim = c(Time, 20000, d)) #particles t horizontal; N vertical, d
+X <- array(0, dim = c(Time, 30000, d)) #particles t horizontal; N vertical, d
 X_true <- matrix(0, nrow = Time, ncol = d )
 obs <- matrix(0, nrow = Time, ncol = d )
-w <- matrix(NA, nrow = Time, ncol = 20000 ) #weight
+w <- matrix(NA, nrow = Time, ncol = 30000 ) #weight
 Z <- vector()  #approximation
 
 # FKF
@@ -43,7 +44,7 @@ g <- function(y, x){
   #det(diag(2*pi, nrow = d, ncol = d))^(-1/2) = 0.01010533
 }
 
-psi <- matrix(NA, nrow = Time, ncol = 20000) #iterated psi to decide psi_t for each l
+psi <- matrix(NA, nrow = Time, ncol = 30000) #iterated psi to decide psi_t for each l
 
 mu_aux <- function(psi_pa, l){
   return(mvrnorm(N[l], mu =  as.vector(diag(((psi_pa[1, (d+1):(d+5)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
@@ -118,6 +119,7 @@ psi_t <- function(x, psi_pa, t){ #from 1 to T+1. 1, T+1 = 1
   return(psi_t)
 }
 
+
 ####APF function####
 APF <- function(psi_pa, l){
   #l >= 2
@@ -128,7 +130,7 @@ APF <- function(psi_pa, l){
   for(i in 1:N[l]){
     w[1,i] <- g_aux(obs[1,], X[1,i,],1, psi_pa) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], psi_pa, 2)  
   }
-  
+  re=0
   #t=2:T
   #2. conditional sample
   for(t in 2:Time){
@@ -138,7 +140,7 @@ APF <- function(psi_pa, l){
     #a)
     
     if(ESS(t,l,w) <= kappa*N[l]){
-      
+      re = re+1
       w_ <- w[t-1,1:N[l]]/sum(w[t-1,1:N[l]])   #each t
       mix <- sample(1:N[l],N[l], replace = TRUE, prob = w_)
       
@@ -166,10 +168,9 @@ APF <- function(psi_pa, l){
     }
     Z[l] = Z[l] + log(sum_g/N[l])
   }
+  print(paste0('re=',re))
   
-  fkf.obj <- -fkf(a0, P0, dt, ct, Tt, Zt, Ht, Gt, yt = t(obs))$logLik
-  
-  return(list(obs, X, w, Z, fkf.obj))
+  return(list(obs, X, w, Z))
 }
 
 ####psi function####
@@ -196,8 +197,6 @@ Psi <- function(l, obs, X){
     
     #2. calculate psi_t
     #calculate min
-    
-    
     fn <- function(x, X, psi){
       sum_arg = 0						
       for(i in 1:N[l]){						
@@ -207,15 +206,13 @@ Psi <- function(l, obs, X){
       }						
       return(sum_arg)
     }
-
     
     #get the distribution of psi_t
     if(t == Time){
-      psi_pa[t,] <- optim(par = c(colMeans(X[t,1:N[l],]), rep(1, d), 1),
+      psi_pa[t,] <- optim(par = c(colMeans(X[t,1:N[l],]), rep(1, d), -1),
                         fn = fn, X = X, psi = psi, method = "BFGS")$par
     }else{
-      psi_pa[t,] <- optim(par = psi_pa[t+1,],
-                        fn = fn, X = X, psi = psi, method = "BFGS")$par
+      psi_pa[t,] <- optim(par = psi_pa[t+1,], fn = fn, X = X, psi = psi, method = "BFGS")$par
     }
      
     
@@ -246,13 +243,15 @@ for(i in 1:N[l]){
 
 #t=2:T
 #2. conditional sample
-
+re = 0
 for(t in 2:Time){
   print(t)
   
   #a)
   
   if(ESS(t,l,w) <= kappa*N[l]){
+    
+    re = re + 1
     
     w_ <- w[t-1,1:N[l]]/sum(w[t-1,1:N[l]])
     mix <- sample(1:N[l], N[l], replace = TRUE, prob = w_)
@@ -278,7 +277,7 @@ for(t in 2:Time){
 for(t in 1:Time){
   Z[l] = Z[l] + log(mean(apply(X[t,1:N[l],],1,function(x) 0.01010533*exp((-1/2)*t(obs[t,]-x)%*%(obs[t,]-x)))))
 }
-
+print(paste0('re=',re))
 fkf.obj <- fkf(a0, P0, dt, ct, Tt, Zt, Ht, Gt, yt = t(obs))$logLik
 
 while(index){
@@ -293,7 +292,6 @@ while(index){
     X <- output[[2]]
     w <- output[[3]]
     Z <- output[[4]]
-    fkf.obj <- output[[5]]
   }
  
   #b)
@@ -320,4 +318,6 @@ while(index){
 }
 
 #3.
+output <-  APF(psi_pa, l)
+Z <- output[[4]]
 Z_appro <- Z[l]
