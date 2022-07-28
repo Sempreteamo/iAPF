@@ -54,9 +54,9 @@ mu_aux <- function(psi_pa, l){   #√
 
 g_aux <- function(y, x, t, psi_pa){   
   if(t == 1){
-    return(g(y, x)*psi_tilda(x, psi_pa, 1)*(det(diag(2*pi*(psi_pa[1, (d+1):(d+d)]^2+1), nrow=d,ncol=d))^
+    return(g(y, x)*psi_tilda(x, psi_pa, 1)*(det(diag(2*pi*(psi_pa[1, (d+1):(d+d)]+1), nrow=d,ncol=d))^
                                                      (-1/2)*exp((-1/2)*t(-psi_pa[1, 1:d])%*%
-                                                                   diag((psi_pa[1, (d+1):(d+d)]^2+1)^(-1), nrow=d,ncol=d)%*%
+                                                                   diag((psi_pa[1, (d+1):(d+d)]+1)^(-1), nrow=d,ncol=d)%*%
                                                                    (-psi_pa[1, 1:d])))/psi_t(x, psi_pa, 1))  #g_1
   }else{
     return(g(y, x)*psi_tilda(x, psi_pa, t)/psi_t(x, psi_pa, t))  #g_2:T 
@@ -64,11 +64,15 @@ g_aux <- function(y, x, t, psi_pa){
 }
 
 f_aux <- function(x, psi_pa, t){  #?? 
-  return(mvrnorm(1, mu = as.vector(diag((psi_pa[t, (d+1):(d+d)]^2+1)^(-1), nrow=d,ncol=d)%*%
-                   (diag(psi_pa[t, (d+1):(d+d)]^2, nrow=d,ncol=d)%*%A%*%x + psi_pa[t,1:d])), 
-                 Sigma = diag((psi_pa[t, (d+1):(d+d)]^2+1)^(-1), nrow = d, ncol = d)%*%
-                   diag(psi_pa[t, (d+1):(d+d)], nrow = d, ncol = d)))  #f_2:T 
-}
+  return(mvrnorm(1, mu = diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
+                   (A%*%x + diag(psi_pa[t, (d+1):(d+d)]^(-1), nrow=d,ncol=d)%*%psi_pa[t,1:d]), 
+                 Sigma = diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)))
+}                   
+                   #diag((psi_pa[t, (d+1):(d+d)]+1)^(-1), nrow = d, ncol = d)%*%
+                   #diag(psi_pa[t, (d+1):(d+d)], nrow = d, ncol = d)))  #f_2:T 
+  
+#as.vector(diag((psi_pa[t, (d+1):(d+d)]+1)^(-1), nrow=d,ncol=d)%*%
+#(diag(psi_pa[t, (d+1):(d+d)], nrow=d,ncol=d)%*%A%*%x + psi_pa[t,1:d]))
 #diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)
 
 ESS <- function(t,l,w){
@@ -101,8 +105,8 @@ psi_tilda <- function(x, psi_pa, t){  #from 0 to T. 0,T = 1
   if(t == Time){
     psi_tilda <- 1
   }else{   #psi_pa_t = psi_t
-    psi_tilda <- det(2*pi*diag(psi_pa[t+1, (d+1):(d+d)]^2+1, nrow=d,ncol=d))^(-1/2)*
-      exp((-1/2)*t(as.vector(A%*%x) - psi_pa[t+1, 1:d])%*%diag((psi_pa[t+1, (d+1):(d+d)]^2+1)^(-1), nrow=d,ncol=d)%*%
+    psi_tilda <- det(2*pi*diag(psi_pa[t+1, (d+1):(d+d)]+1, nrow=d,ncol=d))^(-1/2)*
+      exp((-1/2)*t(as.vector(A%*%x) - psi_pa[t+1, 1:d])%*%diag((psi_pa[t+1, (d+1):(d+d)]+1)^(-1), nrow=d,ncol=d)%*%
             (as.vector(A%*%x)-psi_pa[t+1, 1:d]))
   }
   return(psi_tilda)
@@ -112,8 +116,8 @@ psi_t <- function(x, psi_pa, t){ #from 1 to T+1. 1, T+1 = 1
   if(t == Time + 1){
     psi_t <- 1
   }else{
-    psi_t <- det(diag(2*pi*psi_pa[t, (d+1):(d+d)]^2, nrow=d,ncol=d))^(-1/2)*						
-      exp((-1/2)*t(x-psi_pa[t, 1:d])%*%diag((psi_pa[t, (d+1):(d+d)])^(-2), nrow=d,ncol=d)%*%						
+    psi_t <- det(diag(2*pi*psi_pa[t, (d+1):(d+d)], nrow=d,ncol=d))^(-1/2)*						
+      exp((-1/2)*t(x-psi_pa[t, 1:d])%*%diag((psi_pa[t, (d+1):(d+d)])^(-1), nrow=d,ncol=d)%*%						
             (x-psi_pa[t, 1:d]))
   }
   
@@ -213,10 +217,10 @@ Psi <- function(l, obs, X){
     #get the distribution of psi_t
     if(t == Time){
       psi_pa[t,] <- optim(par = c(colMeans(X[t,1:N[l],]), rep(1, d)),
-                        fn = fn, X = X, psi = psi, method='L-BFGS-B',lower=c(-Inf,0,0),upper=c(Inf,Inf,Inf))$par
+                        fn = fn, X = X, psi = psi, method='L-BFGS-B',lower=c(rep(-Inf, d),rep(0, d)),upper=rep(Inf, 2*d))$par
     }else{
       psi_pa[t,] <- optim(par = c(X[t,which.max(psi[t,1:N[l]]),], rep(1, d)), 
-                          fn = fn, X = X, psi = psi, method = 'L-BFGS-B',lower=c(-Inf,0,0),upper=c(Inf,Inf,Inf))$par
+                          fn = fn, X = X, psi = psi, method = 'L-BFGS-B',lower=c(rep(-Inf, d),rep(0, d)),upper=rep(Inf, 2*d))$par
     }
      
     print(psi_pa[t,])
