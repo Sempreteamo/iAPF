@@ -5,7 +5,7 @@ library(profvis)
 library(FKF)
 
 ####settings####
-set.seed(456)
+set.seed(05672)
 alpha <- 0.42
 d <- 5
 k <- 5
@@ -42,6 +42,7 @@ f <- function(x){
 g <- function(y, x){  
   return (as.numeric(det(diag(2*pi, nrow = d, ncol = d))^(-1/2)*exp((-1/2)*t(y-x)%*%(y-x)))) #obs prob  C%*%x = x
   #det(diag(2*pi, nrow = d, ncol = d))^(-1/2) = 0.01010533
+  
 }
 
 psi <- matrix(NA, nrow = Time, ncol = 30000) #iterated psi to decide psi_t for each l
@@ -54,7 +55,7 @@ mu_aux <- function(psi_pa, l){   #√
 
 g_aux <- function(y, x, t, psi_pa){   
   if(t == 1){
-    return(g(y, x)*psi_tilda(x, psi_pa, 1)*(det(diag(2*pi*(psi_pa[1, (d+1):(d+d)]+1), nrow=d,ncol=d))^
+    return(g(y, x)*psi_tilda(x, psi_pa, 1)*(det(2*pi*diag((psi_pa[1, (d+1):(d+d)]+1), nrow=d,ncol=d))^
                                                      (-1/2)*exp((-1/2)*t(-psi_pa[1, 1:d])%*%
                                                                    diag((psi_pa[1, (d+1):(d+d)]+1)^(-1), nrow=d,ncol=d)%*%
                                                                    (-psi_pa[1, 1:d])))/psi_t(x, psi_pa, 1))  #g_1
@@ -64,8 +65,8 @@ g_aux <- function(y, x, t, psi_pa){
 }
 
 f_aux <- function(x, psi_pa, t){  #?? 
-  return(mvrnorm(1, mu = diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
-                   (A%*%x + diag(psi_pa[t, (d+1):(d+d)]^(-1), nrow=d,ncol=d)%*%psi_pa[t,1:d]), 
+  return(mvrnorm(1, mu = as.vector(diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
+                   (A%*%x + diag(psi_pa[t, (d+1):(d+d)]^(-1), nrow=d,ncol=d)%*%psi_pa[t,1:d])), 
                  Sigma = diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)))
 }                   
                    #diag((psi_pa[t, (d+1):(d+d)]+1)^(-1), nrow = d, ncol = d)%*%
@@ -73,16 +74,25 @@ f_aux <- function(x, psi_pa, t){  #??
   
 #as.vector(diag((psi_pa[t, (d+1):(d+d)]+1)^(-1), nrow=d,ncol=d)%*%
 #(diag(psi_pa[t, (d+1):(d+d)], nrow=d,ncol=d)%*%A%*%x + psi_pa[t,1:d]))
-#diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)
 
-ESS <- function(t,l,w){
-  return(sum(w[t-1,1:N[l]])^2/sum(w[t-1,1:N[l]]^2))
+
+ESS <- function(t,l,w, is.log=FALSE){
+  if(is.log) {
+    mx <- max(w[t-1,1:N[l]])
+    s <- sum(exp(w[t-1,1:N[l]]-mx))
+    ess <- 1/sum((exp(w[t-1,1:N[l]]-mx)/s)^2)
+  }else{
+    s <- sum(w[t-1,1:N[l]])
+    ess <- 1/sum((w[t-1,1:N[l]]/s)^2) 
+  }
+  return(ess)  
 }
+#sum(w[t-1,1:N[l]])^2/sum(w[t-1,1:N[l]]^2)
 
 psi_pa <- matrix(NA, nrow = Time, ncol = 2*d)
 
 Num <- function(Z, l, k){
-  return(sd(exp(Z[max(l-k,1):l]-max(Z)))/mean(exp(Z[max(l-k,1):l]-max(Z))))
+  return(sd(exp(Z[max(l-k,1):l]-max(Z[max(l-k,1):l])))/mean(exp(Z[max(l-k,1):l]-max(Z[max(l-k,1):l]))))
   }
 
 Obs <- function(){
@@ -105,7 +115,7 @@ psi_tilda <- function(x, psi_pa, t){  #from 0 to T. 0,T = 1
   if(t == Time){
     psi_tilda <- 1
   }else{   #psi_pa_t = psi_t
-    psi_tilda <- det(2*pi*diag(psi_pa[t+1, (d+1):(d+d)]+1, nrow=d,ncol=d))^(-1/2)*
+    psi_tilda <- det(2*pi*diag(psi_pa[t+1, (d+1):(d+d)]+1, nrow=d, ncol=d))^(-1/2)*
       exp((-1/2)*t(as.vector(A%*%x) - psi_pa[t+1, 1:d])%*%diag((psi_pa[t+1, (d+1):(d+d)]+1)^(-1), nrow=d,ncol=d)%*%
             (as.vector(A%*%x)-psi_pa[t+1, 1:d]))
   }
@@ -116,7 +126,7 @@ psi_t <- function(x, psi_pa, t){ #from 1 to T+1. 1, T+1 = 1
   if(t == Time + 1){
     psi_t <- 1
   }else{
-    psi_t <- det(diag(2*pi*psi_pa[t, (d+1):(d+d)], nrow=d,ncol=d))^(-1/2)*						
+    psi_t <- det(2*pi*diag(psi_pa[t, (d+1):(d+d)], nrow=d,ncol=d))^(-1/2)*						
       exp((-1/2)*t(x-psi_pa[t, 1:d])%*%diag((psi_pa[t, (d+1):(d+d)])^(-1), nrow=d,ncol=d)%*%						
             (x-psi_pa[t, 1:d]))
   }
@@ -133,9 +143,10 @@ APF <- function(psi_pa, l){
   X[1,1:N[l],] <- mu_aux(psi_pa, l)  #particles
   
   for(i in 1:N[l]){
-    w[1,i] <- g_aux(obs[1,], X[1,i,],1, psi_pa) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], psi_pa, 2)  
+    w[1,i] <- log(g_aux(obs[1,], X[1,i,],1, psi_pa)) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], psi_pa, 2)  
   }
   re=0
+  
   #t=2:T
   #2. conditional sample
   for(t in 2:Time){
@@ -144,14 +155,16 @@ APF <- function(psi_pa, l){
     
     #a)
     
-    if(ESS(t,l,w) <= kappa*N[l]){
+    if(ESS(t,l,w, is.log=TRUE) <= kappa*N[l]){
+      mx <- max(w[t-1, 1:N[l]])
+      Z[l] <- Z[l] + log(mean(exp(w[t-1, 1:N[l]]-mx))) + mx	
       re = re+1
-      w_ <- w[t-1,1:N[l]]/sum(w[t-1,1:N[l]])   #each t
+      w_ <- exp(w[t-1,1:N[l]]-mx)/sum(exp(w[t-1,1:N[l]]-mx))   #each t
       mix <- sample(1:N[l],N[l], replace = TRUE, prob = w_)
       
       for(i in 1:N[l]){
         X[t,i,] <- f_aux(X[t-1, mix[i],], psi_pa, t)
-        w[t,i] <- g_aux(obs[t,], X[t,i,], t, psi_pa)  
+        w[t,i] <- log(g_aux(obs[t,], X[t,i,], t, psi_pa))  
       }
     }else{
       
@@ -159,19 +172,21 @@ APF <- function(psi_pa, l){
       for(i in 1:N[l]){
         
         X[t,i,] <- f_aux(X[t-1,i,],psi_pa, t) 
-        w[t,i] <- w[t-1,i]*g_aux(obs[t,], X[t,i,],t, psi_pa)  
+        w[t,i] <- w[t-1,i] + log(g_aux(obs[t,], X[t,i,],t, psi_pa))  
       }
     }
     
   }
+  mx <- max(w[t,1:N])
+  Z[l] <- Z[l] + log(mean(exp(w[t,1:N]-mx))) + mx
   
-  for(t in 1:Time){
-    sum_g = 0
-    for(i in 1:N[l]){
-      sum_g = sum_g + g_aux(obs[t,],X[t,i,],t,psi_pa)
-    }
-    Z[l] = Z[l] + log(sum_g/N[l])
-  }
+  #for(t in 1:Time){
+    #sum_g = 0
+    #for(i in 1:N[l]){
+      #sum_g = sum_g + g_aux(obs[t,],X[t,i,],t,psi_pa)
+    #}
+    #Z[l] = Z[l] + log(sum_g/N[l])
+  #}
   print(paste0('re=',re))
   
   return(list(obs, X, w, Z))
@@ -187,6 +202,7 @@ Psi <- function(l, obs, X){
     
     if(t == Time){
       psi[t,1:N[l]] <- dmvnorm(X[t,1:N[l],], obs[t,])
+      
     }else{
       
       for(i in 1:N[l]){
@@ -203,7 +219,7 @@ Psi <- function(l, obs, X){
     #2. calculate psi_t
     #calculate min
     fn <- function(x, X, psi){
-      lambda <-  2*sum(dmvnorm(X[t,1:N[l],],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d))%*%psi[t,1:N[l]]) / sum(psi[t,1:N[l]]^2)
+      lambda <-  sum(dmvnorm(X[t,1:N[l],],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d))%*%psi[t,1:N[l]]) / sum(psi[t,1:N[l]]^2)
       return(sum((psi[t,1:N[l]] - (1/lambda)*dmvnorm(X[t,1:N[l],],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d)))^2))
       #sum_arg = 0						
       #for(i in 1:N[l]){						
@@ -221,7 +237,7 @@ Psi <- function(l, obs, X){
     }else{
       psi_pa[t,] <- optim(par = c(X[t,which.max(psi[t,1:N[l]]),], rep(1, d)), 
                           fn = fn, X = X, psi = psi, method = 'L-BFGS-B',lower=c(rep(-Inf, d),rep(0, d)),upper=rep(Inf, 2*d))$par
-    }
+    }#X[t,which.max(psi[t,1:N[l]]),]
      
     print(psi_pa[t,])
     print(obs[t,])
@@ -231,7 +247,7 @@ Psi <- function(l, obs, X){
   
 }
 
-####2. repeat####
+####bpf####
 obs <- Obs()
 fkf.obj <- fkf(a0, P0, dt, ct, Tt, Zt, Ht, Gt, yt = t(obs))$logLik
 
@@ -247,8 +263,9 @@ l = 1  #actually 0
 
 X[1,1:N[l],] <- rnorm(N[l]*d)  #particles
 for(i in 1:N[l]){
-  w[1,i] <- g(obs[1,], X[1,i,])  #weights
+  w[1,i] <- log(g(obs[1,], X[1,i,]))  #weights
 }
+Z[l] <- 0
 
 #t=2:T
 #2. conditional sample
@@ -258,17 +275,18 @@ for(t in 2:Time){
   
   #a)
   
-  if(ESS(t,l,w) <= kappa*N[l]){
+  if(ESS(t,l,w, is.log = TRUE) <= kappa*N[l]){
     
     re = re + 1
-    
-    w_ <- w[t-1,1:N[l]]/sum(w[t-1,1:N[l]])
+    mx <- max(w[t-1, 1:N[l]])
+    Z[l] <- Z[l] + log(mean(exp(w[t-1, 1:N[l]]-mx))) + mx
+    w_ <- exp(w[t-1,1:N[l]]-mx)/sum(exp(w[t-1,1:N[l]] - mx))
     mix <- sample(1:N[l], N[l], replace = TRUE, prob = w_)
     X[t,1:N[l],] <- apply(X[t-1, mix,], 1, f )
     
     for(i in 1:N[l]){
       
-      w[t,i] <- g(obs[t,], X[t,i,])  
+      w[t,i] <- log(g(obs[t,], X[t,i,]))  
     }
     
   }else{
@@ -277,18 +295,21 @@ for(t in 2:Time){
    
     for(i in 1:N[l]){
       X[t,i,] <- f(X[t-1,i,])   
-      w[t,i] <- w[t-1,i]*g(obs[t,], X[t,i,])  
+      w[t,i] <- w[t-1,i] + log(g(obs[t,], X[t,i,]))  
     }
   }
   
 }
 
-Z[1] = 0
-for(t in 1:Time){
-  Z[l] = Z[l] + log(mean(apply(X[t,1:N[l],],1,function(x) det(diag(2*pi, nrow = d, ncol = d))^(-1/2)*exp((-1/2)*t(obs[t,]-x)%*%(obs[t,]-x)))))
-}
+#Z[1] = 0
+#for(t in 1:Time){
+  #Z[l] = Z[l] + log(mean(apply(X[t,1:N[l],],1,function(x) det(diag(2*pi, nrow = d, ncol = d))^(-1/2)*exp((-1/2)*t(obs[t,]-x)%*%(obs[t,]-x)))))
+#}
+mx <- max(w[Time,1:N[l]])
+Z[l] <- Z[l] + log(mean(exp(w[t,1:N[l]]-mx))) + mx
 print(paste0('re=',re))
 
+####iapf####
 while(index){
   
   print(l)
@@ -324,9 +345,13 @@ while(index){
     
     l <- l+1
   }else break
+  
 }
 
 #3.
 output <-  APF(psi_pa, l)
 Z <- output[[4]]
 Z_appro <- Z[l]
+exp(Z-fkf.obj)
+
+
