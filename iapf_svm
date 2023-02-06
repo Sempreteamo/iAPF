@@ -1,6 +1,3 @@
-library(mvtnorm)
-library(MASS)
-library(profvis)
 library(FKF)
 
 ####settings####
@@ -26,7 +23,7 @@ Z <- vector()  #approximation
 
 # FKF
 
-psi <- matrix(NA, nrow = Time, ncol = 30000) #iterated psi to decide psi_t for each l
+psi <- matrix(NA, nrow = Time, ncol = 3000) #iterated psi to decide psi_t for each l
 
 mu_aux <- function(psi_pa, l){
   return(rnorm(N[l], mean =  psi_pa[t,1]*B^2/((B^2/(1-A)^2+psi_pa[t,2]^2)*(1-A)^2), 
@@ -145,7 +142,7 @@ APF <- function(psi_pa, l){
   
   print(paste0('re=',re))
   mx <- max(w[Time, 1:N[l]])
-  Z[l] <- Z[l] + log(mean(exp(w[Time,1:N[l] ]-mx))) + mx
+  Z[l] <- Z[l] + log(mean(exp(w[Time,1:N[l]]-mx))) + mx
   
   return(list(obs, X, w, Z))
 }
@@ -192,10 +189,10 @@ Psi <- function(l, obs, X){
     #get the distribution of psi_t
     if(t == Time){
       psi_pa[t,] <- optim(par = c(0,1),
-                          fn = fn, X = X, psi = psi, method='L-BFGS-B',lower=c(-20,0.5),upper=c(Inf,Inf))$par
+                          fn = fn, X = X, psi = psi, method='L-BFGS-B',lower=c(-10,0.5),upper=c(Inf,10))$par
     }else{
       psi_pa[t,] <- optim(par = c(0,1), 
-                          fn = fn, X = X, psi = psi, method='L-BFGS-B',lower=c(-20,0.5),upper=c(Inf,Inf))$par
+                          fn = fn, X = X, psi = psi, method='L-BFGS-B',lower=c(-10,0.5),upper=c(Inf,10))$par
     }
     
     print(psi_pa[t,])
@@ -220,7 +217,7 @@ l = 1  #actually 0
 #t = 1
 #generate particles and weights
 
-X[1,1:N[l]] <- rnorm(N[l], mean = 0, sd = B/sqrt(1 - A^2))  #particles
+X[1,1:N[l]] <- rnorm(N[l], mean = 0, sd = B/(1 - A))  #particles
 w[1,1:N[l]] <- dnorm(obs[1], mean = 0, sd = beta*sqrt(exp(X[1,1:N[l]])), log = TRUE)   #problem!!!!
 #for(i in 1:N[l]){
 #w[1,i] <- g(obs[1], X[1,i])  #weights
@@ -228,7 +225,7 @@ w[1,1:N[l]] <- dnorm(obs[1], mean = 0, sd = beta*sqrt(exp(X[1,1:N[l]])), log = T
 re = 0
 #t=2:T
 #2. conditional sample
-
+Z[1] = 0 
 for(t in 2:Time){
   print(t)
   
