@@ -4,7 +4,7 @@ library(profvis)
 library(FKF)
 
 ####settings####
-set.seed(672)
+set.seed(72)
 alpha <- 0.42
 d <- 5
 k <- 5
@@ -79,12 +79,12 @@ f_aux <- function(x, psi_pa, t){  #??
 
 ESS <- function(t,l,w, is.log=FALSE){
   if(is.log) {
-    mx <- max(w[t-1,1:N[l]])
-    s <- sum(exp(w[t-1,1:N[l]]-mx))
-    ess <- 1/sum((exp(w[t-1,1:N[l]]-mx)/s)^2)
+    mx <- max(w[t-1, ])
+    s <- sum(exp(w[t-1, ]-mx))
+    ess <- 1/sum((exp(w[t-1, ]-mx)/s)^2)
   }else{
-    s <- sum(w[t-1,1:N[l]])
-    ess <- 1/sum((w[t-1,1:N[l]]/s)^2) 
+    s <- sum(w[t-1, ])
+    ess <- 1/sum((w[t-1, ]/s)^2) 
   }
   return(ess)  
 }
@@ -144,12 +144,12 @@ APF <- function(psi_pa, l, N){
   w <- matrix(NA, Time, N[l])
   Z[l] <- 0
   
-  X[1,1:N[l],] <- mu_aux(psi_pa, l)  #particles
+  X[1, ,] <- mu_aux(psi_pa, l)  #particles
   
   for(i in 1:N[l]){
     w[1,i] <- log(g_aux(obs[1,], X[1,i,],1, psi_pa)) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], psi_pa, 2)  
   }
-  £re=0
+  #re=0
   
   #t=2:T
   #2. conditional sample
@@ -160,10 +160,10 @@ APF <- function(psi_pa, l, N){
     #a)
     
     if(ESS(t,l,w, is.log=TRUE) <= kappa*N[l]){
-      mx <- max(w[t-1, 1:N[l]])
-      Z[l] <- Z[l] + log(mean(exp(w[t-1, 1:N[l]]-mx))) + mx	
+      mx <- max(w[t-1,  ])
+      Z[l] <- Z[l] + log(mean(exp(w[t-1,  ]-mx))) + mx	
       #re = re+1
-      w_ <- exp(w[t-1,1:N[l]]-mx)/sum(exp(w[t-1,1:N[l]]-mx))   #each t
+      w_ <- exp(w[t-1, ]-mx)/sum(exp(w[t-1, ]-mx))   #each t
       mix <- sample(1:N[l],N[l], replace = TRUE, prob = w_)
       
       for(i in 1:N[l]){
@@ -184,15 +184,6 @@ APF <- function(psi_pa, l, N){
   mx <- max(w[t,])
   Z[l] <- Z[l] + log(mean(exp(w[t,]-mx))) + mx
   
-  #for(t in 1:Time){
-  #sum_g = 0
-  #for(i in 1:N[l]){
-  #sum_g = sum_g + g_aux(obs[t,],X[t,i,],t,psi_pa)
-  #}
-  #Z[l] = Z[l] + log(sum_g/N[l])
-  #}
-  #print(paste0('re=',re))
-  
   return(list(obs, X, w, Z))
 }
 
@@ -206,7 +197,7 @@ Psi <- function(l, obs, X){
     #print(t)
     
     if(t == Time){
-      psi[t,1:N[l]] <- dmvnorm(X[t,1:N[l],], obs[t,])
+      psi[t, ] <- dmvnorm(X[t, ,], obs[t,])
       
     }else{
       
@@ -224,8 +215,8 @@ Psi <- function(l, obs, X){
     #2. calculate psi_t
     #calculate min
     fn <- function(x, X, psi){
-      lambda <-  sum(dmvnorm(X[t,1:N[l],],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d))%*%psi[t,1:N[l]])/sum(psi[t,1:N[l]]^2)
-      return(sum((psi[t,1:N[l]] - (1/lambda)*dmvnorm(X[t,1:N[l],],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d)))^2))
+      lambda <-  sum(dmvnorm(X[t, ,],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d))%*%psi[t, ])/sum(psi[t, ]^2)
+      return(sum((psi[t, ] - (1/lambda)*dmvnorm(X[t, ,],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d)))^2))
       #sum_arg = 0						
       #for(i in 1:N[l]){						
       #sum_arg = sum_arg + (det(diag(2*pi*x[(d+1):(d+d)], nrow=d,ncol=d))^(-1/2)*						
@@ -237,10 +228,10 @@ Psi <- function(l, obs, X){
     
     #get the distribution of psi_t
     if(t == Time){
-      psi_pa[t,] <- optim(par = c(colMeans(X[t,1:N[l],]), rep(1, d)),
+      psi_pa[t,] <- optim(par = c(colMeans(X[t, ,]), rep(1, d)),
                           fn = fn, X = X, psi = psi, method='L-BFGS-B',lower=c(rep(-Inf, d),rep(0, d)),upper=rep(Inf, 2*d))$par
     }else{
-      psi_pa[t,] <- optim(par = c(X[t,which.max(psi[t,1:N[l]]),], rep(1, d)), 
+      psi_pa[t,] <- optim(par = c(X[t,which.max(psi[t, ]),], rep(1, d)), 
                           fn = fn, X = X, psi = psi, method = 'L-BFGS-B',lower=c(rep(-Inf, d),rep(0, d)),upper=rep(Inf, 2*d))$par
     }#X[t,which.max(psi[t,1:N[l]]),]
     
@@ -266,7 +257,7 @@ l = 1  #actually 0
 #t = 1
 #generate particles and weights
 
-X[1,1:N[l],] <- rnorm(N[l]*d)  #particles
+X[1, ,] <- rnorm(N[l]*d)  #particles
 for(i in 1:N[l]){
   w[1,i] <- log(g(obs[1,], X[1,i,]))  #weights
 }
@@ -283,11 +274,11 @@ for(t in 2:Time){
   if(ESS(t,l,w, is.log = TRUE) <= kappa*N[l]){
     
     re = re + 1
-    mx <- max(w[t-1, 1:N[l]])
-    Z[l] <- Z[l] + log(mean(exp(w[t-1, 1:N[l]]-mx))) + mx
-    w_ <- exp(w[t-1,1:N[l]]-mx)/sum(exp(w[t-1,1:N[l]] - mx))
+    mx <- max(w[t-1,  ])
+    Z[l] <- Z[l] + log(mean(exp(w[t-1,  ]-mx))) + mx
+    w_ <- exp(w[t-1, ]-mx)/sum(exp(w[t-1, ] - mx))
     mix <- sample(1:N[l], N[l], replace = TRUE, prob = w_)
-    X[t,1:N[l],] <- apply(X[t-1, mix,], 1, f )
+    X[t, ,] <- apply(X[t-1, mix,], 1, f )
     
     for(i in 1:N[l]){
       
@@ -306,8 +297,8 @@ for(t in 2:Time){
   
 }
 
-mx <- max(w[Time,1:N[l]])
-Z[l] <- Z[l] + log(mean(exp(w[t,1:N[l]]-mx))) + mx
+mx <- max(w[Time, ])
+Z[l] <- Z[l] + log(mean(exp(w[t, ]-mx))) + mx
 #print(paste0('re=',re))
 
 ####iapf####
