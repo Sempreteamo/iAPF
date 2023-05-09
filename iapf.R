@@ -149,7 +149,7 @@ APF <- function(psi_pa, l, N){
   for(i in 1:N[l]){
     w[1,i] <- log(g_aux(obs[1,], X[1,i,],1, psi_pa)) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], psi_pa, 2)  
   }
-  re=0
+  £re=0
   
   #t=2:T
   #2. conditional sample
@@ -162,7 +162,7 @@ APF <- function(psi_pa, l, N){
     if(ESS(t,l,w, is.log=TRUE) <= kappa*N[l]){
       mx <- max(w[t-1, 1:N[l]])
       Z[l] <- Z[l] + log(mean(exp(w[t-1, 1:N[l]]-mx))) + mx	
-      re = re+1
+      #re = re+1
       w_ <- exp(w[t-1,1:N[l]]-mx)/sum(exp(w[t-1,1:N[l]]-mx))   #each t
       mix <- sample(1:N[l],N[l], replace = TRUE, prob = w_)
       
@@ -181,8 +181,8 @@ APF <- function(psi_pa, l, N){
     }
     
   }
-  mx <- max(w[t,1:N])
-  Z[l] <- Z[l] + log(mean(exp(w[t,1:N]-mx))) + mx
+  mx <- max(w[t,])
+  Z[l] <- Z[l] + log(mean(exp(w[t,]-mx))) + mx
   
   #for(t in 1:Time){
   #sum_g = 0
