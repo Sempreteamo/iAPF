@@ -7,7 +7,7 @@ library(mvnfast)
 ####settings####
 set.seed(1)
 alpha <- 0.42
-d <- 8
+d <- 5
 k <- 5
 kappa <- 0.5
 tau <- 0.5
@@ -50,9 +50,9 @@ g <- function(y, x){
 #psi <- matrix(NA, nrow = Time, ncol = 30000) #iterated psi to decide psi_t for each l
 
 mu_aux <- function(psi_pa, l){   #???
-  return(rmvn(N[l], mu =  as.vector(diag(((psi_pa[1, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
-                                         (diag((psi_pa[1, (d+1):(d+d)])^(-1), nrow=d,ncol=d)%*%psi_pa[1,1:d])), 
-                 Sigma = diag(((psi_pa[1, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)))
+  return(rmvn(N[l], as.vector(diag(((psi_pa[1, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
+                                      (diag((psi_pa[1, (d+1):(d+d)])^(-1), nrow=d,ncol=d)%*%psi_pa[1,1:d])), 
+              diag(((psi_pa[1, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)))
 }
 
 g_aux <- function(y, x, t, psi_pa){   
@@ -67,9 +67,9 @@ g_aux <- function(y, x, t, psi_pa){
 }
 
 f_aux <- function(x, psi_pa, t){  #?? 
-  return(rmvn(1, mu = as.vector(diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
-                                     (A%*%x + diag(psi_pa[t, (d+1):(d+d)]^(-1), nrow=d,ncol=d)%*%psi_pa[t,1:d])), 
-                 Sigma = diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)))
+  return(rmvn(1, as.vector(diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
+                                  (A%*%x + diag(psi_pa[t, (d+1):(d+d)]^(-1), nrow=d,ncol=d)%*%psi_pa[t,1:d])), 
+              diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)))
 }                   
 #diag((psi_pa[t, (d+1):(d+d)]+1)^(-1), nrow = d, ncol = d)%*%
 #diag(psi_pa[t, (d+1):(d+d)], nrow = d, ncol = d)))  #f_2:T 
@@ -198,7 +198,7 @@ Psi <- function(l, obs, X){
     #print(t)
     
     if(t == Time){
-      psi[t, ] <- dmvn(X[t, ,], obs[t,])
+      psi[t, ] <- dmvn(X[t, ,], obs[t,], D)
       
     }else{
       
@@ -347,4 +347,3 @@ Z <- output[[4]]
 psi_pa <- output[[5]]
 Z_appro <- Z[l]
 exp(Z_appro-fkf.obj)
-
