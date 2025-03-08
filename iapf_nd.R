@@ -1,57 +1,26 @@
-library(mvtnorm)
-library(MASS)
-library(profvis)
-library(FKF)
-library(mvnfast)
-
-####settings####
-set.seed(1)
-alpha <- 0.42
-d <- 5
-k <- 5
-kappa <- 0.5
-tau <- 0.5
-m <- rep(0, d)
-N <- vector()
-N[1] <- 200
-Time <- 200
-cov = B = C = D = diag(1, nrow = d, ncol = d)
-A <- matrix(nrow = d, ncol = d)
-for (i in 1:d){
-  for (j in 1:d){
-    A[i,j] = alpha^(abs(i-j) + 1)
-  }
-}
-X <- array(NA, dim = c(Time, N, d))
-#X <- array(0, dim = c(Time, 30000, d)) #particles t horizontal; N vertical, d
-X_true <- matrix(0, nrow = Time, ncol = d )
-obs <- matrix(0, nrow = Time, ncol = d )
-w <- matrix(NA, Time, N)
-#w <- matrix(NA, nrow = Time, ncol = 30000 ) #weight
-Z <- vector()  #approximation
-
-# FKF
-
-dt <- ct <- matrix(0,d,1)
-Tt <- A
-P0 <- Zt <- Ht <- Gt <- diag(1,d,d)
-a0 <- rep(0,d)
 
 f <- function(x){
   return (rnorm(d) + as.vector(A%*%x))   #trans prob
 }
 
 g <- function(y, x){  
-  return (as.numeric(det(diag(2*pi, nrow = d, ncol = d))^(-1/2)*exp((-1/2)*t(y-x)%*%(y-x)))) #obs prob  C%*%x = x
-  #det(diag(2*pi, nrow = d, ncol = d))^(-1/2) = 0.01010533
+  d <- length(y)  # Ensure dimension consistency
+  inv_D <- solve(D)  # Inverse of observation covariance matrix D
+  det_D <- det(D)  # Determinant of D
   
+  # Compute the Mahalanobis distance term
+  mahalanobis_term <- t(y - C %*% x) %*% inv_D %*% (y - C %*% x)
+  
+  # Compute the likelihood
+  likelihood <- (det_D^(-1/2) * (2 * pi)^(-d/2)) * exp(-0.5 * mahalanobis_term)
+  
+  return(as.numeric(likelihood))
 }
-
 #psi <- matrix(NA, nrow = Time, ncol = 30000) #iterated psi to decide psi_t for each l
 
 mu_aux <- function(psi_pa, l){   #???
   return(rmvn(N[l], as.vector(diag(((psi_pa[1, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
-                                      (diag((psi_pa[1, (d+1):(d+d)])^(-1), nrow=d,ncol=d)%*%psi_pa[1,1:d])), 
+                                (diag((psi_pa[1, (d+1):(d+d)])^(-1), nrow=d,ncol=d)%*%psi_pa[1,1:d])), 
               diag(((psi_pa[1, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)))
 }
 
@@ -66,11 +35,10 @@ g_aux <- function(y, x, t, psi_pa){
   }
 }
 
-f_aux <- function(x, psi_pa, t){  #?? 
-  return(rmvn(1, as.vector(diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)%*%
-                                  (A%*%x + diag(psi_pa[t, (d+1):(d+d)]^(-1), nrow=d,ncol=d)%*%psi_pa[t,1:d])), 
-              diag(((psi_pa[t, (d+1):(d+d)])^(-1)+1)^(-1), nrow=d,ncol=d)))
-}                   
+f_aux <- function(x, psi_pa, t){    
+  return(rnorm(1, (psi_pa[t,2]^2*A*x + B^2*psi_pa[t,1])/(psi_pa[t,2]^2 + B^2), 
+               sqrt(psi_pa[t,2]^2*B^2 / (psi_pa[t,2]^2 + B^2))))  #f_2:T 
+}                
 #diag((psi_pa[t, (d+1):(d+d)]+1)^(-1), nrow = d, ncol = d)%*%
 #diag(psi_pa[t, (d+1):(d+d)], nrow = d, ncol = d)))  #f_2:T 
 
@@ -141,6 +109,7 @@ psi_t <- function(x, psi_pa, t){ #from 1 to T+1. 1, T+1 = 1
 ####APF function####
 APF <- function(psi_pa, l, N){
   #l >= 2
+  log_likelihoods <- matrix(NA, Time, N[l])
   X <- array(NA, dim = c(Time, N[l], d))
   w <- matrix(NA, Time, N[l])
   Z[l] <- 0
@@ -148,6 +117,7 @@ APF <- function(psi_pa, l, N){
   X[1, ,] <- mu_aux(psi_pa, l)  #particles
   
   for(i in 1:N[l]){
+    log_likelihoods[1,i] <- log(g(obs[1,], X[1,i,])) 
     w[1,i] <- log(g_aux(obs[1,], X[1,i,],1, psi_pa)) #weights g(obs[1,], X[1,i,])*psi_tilda(X[1,i,], psi_pa, 2)  
   }
   #re=0
@@ -169,7 +139,8 @@ APF <- function(psi_pa, l, N){
       
       for(i in 1:N[l]){
         X[t,i,] <- f_aux(X[t-1, mix[i],], psi_pa, t)
-        w[t,i] <- log(g_aux(obs[t,], X[t,i,], t, psi_pa))  
+        w[t,i] <- log(g_aux(obs[t,], X[t,i,], t, psi_pa)) 
+        log_likelihoods[t,i] <- log(g(obs[t,], X[t,i,]))  
       }
     }else{
       
@@ -177,7 +148,8 @@ APF <- function(psi_pa, l, N){
       for(i in 1:N[l]){
         
         X[t,i,] <- f_aux(X[t-1,i,],psi_pa, t) 
-        w[t,i] <- w[t-1,i] + log(g_aux(obs[t,], X[t,i,],t, psi_pa))  
+        w[t,i] <- w[t-1,i] + log(g_aux(obs[t,], X[t,i,],t, psi_pa)) 
+        log_likelihoods[t,i] <- log(g(obs[t,], X[t,i,]))  
       }
     }
     
@@ -185,12 +157,12 @@ APF <- function(psi_pa, l, N){
   mx <- max(w[t,])
   Z[l] <- Z[l] + log(mean(exp(w[t,]-mx))) + mx
   
-  return(list(obs, X, w, Z, psi_pa))
+  return(list(obs, X, w, Z, psi_pa, log_likelihoods = log_likelihoods))
 }
 
 ####psi function####
 Psi <- function(l, obs, X){
-  psi <- matrix(NA, nrow = Time, ncol = N[l])
+  log_psi <- matrix(NA, nrow = Time, ncol = N[l])
   psi_pa <- matrix(NA, nrow = Time, ncol = 2*d)
   
   for(t in Time:1){
@@ -198,12 +170,13 @@ Psi <- function(l, obs, X){
     #print(t)
     
     if(t == Time){
-      psi[t, ] <- dmvn(X[t, ,], obs[t,], D)
+      log_psi[t, ] <- log(dmvn(X[t, ,], C%*%obs[t,], D))
       
     }else{
       
       for(i in 1:N[l]){
-        psi[t,i] <- g(obs[t,],X[t,i,])*dmvn(as.vector(A%*%X[t,i,]), psi_pa[t+1, 1:d], diag(psi_pa[t+1, (d+1):(d+d)]+1, nrow=d,ncol=d))
+        log_psi[t,i] <- log(g(obs[t,],X[t,i,])) + 
+          log(dmvn(as.vector(A%*%X[t,i,]), psi_pa[t+1, 1:d], diag(psi_pa[t+1, (d+1):(d+d)]+1, nrow=d,ncol=d)))
         
       }
       #det(2*pi*(diag(psi_pa[t+1, (d+1):(d+d)]+1, nrow=d,ncol=d)))^
@@ -215,9 +188,9 @@ Psi <- function(l, obs, X){
     
     #2. calculate psi_t
     #calculate min
-    fn <- function(x, X, psi){
-      lambda <-  sum(dmvn(X[t, ,],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d))%*%psi[t, ])/sum(psi[t, ]^2)
-      return(sum((psi[t, ] - (1/lambda)*dmvn(X[t, ,],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d)))^2))
+   # fn <- function(x, X, psi){
+    #  lambda <-  sum(dmvn(X[t, ,],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d))%*%psi[t, ])/sum(psi[t, ]^2)
+     # return(sum((psi[t, ] - (1/lambda)*dmvn(X[t, ,],x[1:d],diag(x[(d+1):(d+d)], nrow=d,ncol=d)))^2))
       #sum_arg = 0						
       #for(i in 1:N[l]){						
       #sum_arg = sum_arg + (det(diag(2*pi*x[(d+1):(d+d)], nrow=d,ncol=d))^(-1/2)*						
@@ -225,16 +198,16 @@ Psi <- function(l, obs, X){
       #(X[t,i,]-x[1:d]))-x[2*d+1]*psi[t,i])^2						
       #}						
       #return(sum_arg)
-    }
-    
+    #}
+    psi_pa[t,] <- optimize_psi(X[t,,], log_psi[t,])
     #get the distribution of psi_t
-    if(t == Time){
-      psi_pa[t,] <- optim(par = c(colMeans(X[t, ,]), rep(1, d)),
-                          fn = fn, X = X, psi = psi, method='L-BFGS-B',lower=c(rep(-Inf, d),rep(0, d)),upper=rep(Inf, 2*d))$par
-    }else{
-      psi_pa[t,] <- optim(par = c(X[t,which.max(psi[t, ]),], rep(1, d)), 
-                          fn = fn, X = X, psi = psi, method = 'L-BFGS-B',lower=c(rep(-Inf, d),rep(0, d)),upper=rep(Inf, 2*d))$par
-    }#X[t,which.max(psi[t,1:N[l]]),]
+    #if(t == Time){
+     # psi_pa[t,] <- optim(par = c(colMeans(X[t, ,]), rep(1, d)),
+      #                    fn = fn, X = X, psi = psi, method='L-BFGS-B',lower=c(rep(-Inf, d),rep(0, d)),upper=rep(Inf, 2*d))$par
+    #}else{
+     # psi_pa[t,] <- optim(par = c(X[t,which.max(psi[t, ]),], rep(1, d)), 
+      #                    fn = fn, X = X, psi = psi, method = 'L-BFGS-B',lower=c(rep(-Inf, d),rep(0, d)),upper=rep(Inf, 2*d))$par
+    #}#X[t,which.max(psi[t,1:N[l]]),]
     
     #print(psi_pa[t, 1:d])
     #print(obs[t,])
@@ -244,13 +217,58 @@ Psi <- function(l, obs, X){
   
 }
 
+
+library(mvtnorm)
+library(MASS)
+library(profvis)
+library(FKF)
+library(mvnfast)
+
+####settings####
+set.seed(1)
+alpha <- 0.42
+d <- 2
+k <- 7
+kappa <- 0.5
+tau <- 0.5
+m <- rep(0, d)
+N <- vector()
+N[1] <- 200
+Time <- 100
+
+cov = C = A = diag(1, nrow = d, ncol = d)
+B = diag(1/10, nrow = d_, ncol = d_)
+D = diag(1/2, nrow = d_, ncol = d_)
+#A <- matrix(nrow = d, ncol = d)
+#for (i in 1:d){
+# for (j in 1:d){
+#  A[i,j] = alpha^(abs(i-j) + 1)
+#}
+#}
+X <- array(NA, dim = c(Time, N, d))
+#X <- array(0, dim = c(Time, 30000, d)) #particles t horizontal; N vertical, d
+X_true <- matrix(0, nrow = Time, ncol = d )
+
+w <- matrix(NA, Time, N)
+#w <- matrix(NA, nrow = Time, ncol = 30000 ) #weight
+Z <- vector()  #approximation
+
+# FKF
+
+dt <- ct <- matrix(0,d,1)
+Tt <- A
+P0 <- Zt <- Ht <- Gt <- diag(1,d,d)
+a0 <- rep(0,d)
+
+
 ####bpf####
+obs <- matrix(0, nrow = Time, ncol = d )
 obs <- Obs()
 fkf.obj <- fkf(a0, P0, dt, ct, Tt, Zt, Ht, Gt, yt = t(obs))$logLik
 
 index = 1
 l = 1  #actually 0
-
+log_likelihoods <- matrix(NA, Time, N)
 #initialization l=1, run a psi^0 apf with N[1]
 #psi_1...psi_T+1 = 1
 #psi.tilda_0...psi.tilda_T = 1
@@ -260,8 +278,10 @@ l = 1  #actually 0
 
 X[1, ,] <- rnorm(N[l]*d)  #particles
 for(i in 1:N[l]){
+   
   w[1,i] <- log(g(obs[1,], X[1,i,]))  #weights
 }
+log_likelihoods[1,] <- w[1,]
 Z[l] <- 0
 
 #t=2:T
@@ -285,6 +305,7 @@ for(t in 2:Time){
       
       w[t,i] <- log(g(obs[t,], X[t,i,]))  
     }
+    log_likelihoods[t,] <- w[t,]
     
   }else{
     
@@ -292,8 +313,10 @@ for(t in 2:Time){
     
     for(i in 1:N[l]){
       X[t,i,] <- f(X[t-1,i,])   
+      log_likelihoods[t,i] <- log(g(obs[t,], X[t,i,]))  
       w[t,i] <- w[t-1,i] + log(g(obs[t,], X[t,i,]))  
     }
+    
   }
   
 }
@@ -315,6 +338,7 @@ while(index){
     X <- output[[2]]
     w <- output[[3]]
     Z <- output[[4]]
+    log_likelihoods <- output$log_likelihoods
   }
   
   #b)
@@ -322,7 +346,9 @@ while(index){
   if(l <= k | (Num(Z, l, k) >= tau)){
     #psi^{l+1}
     
-    psi_pa <- Psi(l, obs, X) 
+    psi_pa <- learn_psi(X, obs, model, log_likelihoods)
+    #learn_psi(X, obs, model, log_likelihoods)
+      #Psi(l, obs, X) 
     
     
     if(l > k & N[max(l-k,1)] == N[l] & is.unsorted(Z[max(l-k,1):l])){
@@ -347,3 +373,4 @@ Z <- output[[4]]
 psi_pa <- output[[5]]
 Z_appro <- Z[l]
 exp(Z_appro-fkf.obj)
+
